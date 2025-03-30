@@ -17,6 +17,7 @@ class TrackOnFF(TrackOn):
         super().__init__(args=args)
 
         self.extend_queries = True
+        self.query_times = None
         # self.set_memory_size(new_memory_size, new_memory_size)
 
         self.t = 0
@@ -33,6 +34,8 @@ class TrackOnFF(TrackOn):
         # :args queries: (N, 2)         (x, y) in given frame
         # :args frame: (1, C, H, W)     frame to extract features from
 
+        queries = queries[:,1:]  # (N, 2)
+        self.query_times = queries[:, 0]     # (N)
         self.N = queries.size(0)
         H, W = frame.shape[-2], frame.shape[-1]
 
@@ -49,6 +52,7 @@ class TrackOnFF(TrackOn):
             K = 20
             extra_queries = get_points_on_a_grid(K, self.size, device)           # (1, K ** 2, 2)
             queries = torch.cat([queries, extra_queries[0]], dim=0)              # (N + K ** 2, 2)
+            self.query_times = torch.cat([self.query_times, torch.zeros(extra_queries.shape[1])], dim=0)   # (N + K ** 2)
         self.queries = queries
 
         # === === ===
@@ -113,7 +117,7 @@ class TrackOnFF(TrackOn):
         past_occ = self.past_occ
         past_mask = self.past_mask
         t = self.t
-        query_times = torch.zeros_like(self.queries[:, 0]).unsqueeze(0)  # (1, N_prime)
+        query_times = self.query_times.unsqueeze(0)  # (1, N_prime)
         queried_now_or_before = (query_times <= t)
 
         # ##### Spatial Memory - Query Update #####
