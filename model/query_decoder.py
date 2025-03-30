@@ -70,12 +70,12 @@ class Query_Decoder(nn.Module):
         past_q_mask = past_q_mask.view(B * N, -1)  # (B * N, memory_size)
 
         # True if all masked
-        all_masked = past_q_mask.all(dim=-1)       # (B * N)
+        all_masked = past_q_mask.all(dim=-1)       # (B * N)    True if for that query point, past_q_mask is 1 fully, i.e., it is queries now or later
 
         if all_masked.all():
             return q_t.view(B, N, C), past_q.view(B, N, -1, C)
         
-        useful_query_num = (~all_masked).sum()
+        useful_query_num = (~all_masked).sum()                                             # Number of queries that have been queried before this frame
         qkv = torch.cat([past_q[~all_masked], q_t[~all_masked]], dim=1)                    # (useful_query_num, memory_size + 1, C)
         mask = torch.cat([past_q_mask[~all_masked], 
                           torch.zeros(useful_query_num, 1).bool().to(q_t.device)], dim=1)  # (useful_query_num, memory_size + 1)
