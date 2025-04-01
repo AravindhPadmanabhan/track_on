@@ -408,6 +408,9 @@ class TrackOn(nn.Module):
 
             # ##### Visual Encoder #####
             f_t = self.backbone.encode_frames_online(video[:, t])     # (B, P, C)
+            C = f_t.shape[1]
+            f_t = f_t.permute(0, 2, 3, 1)                           # (B, H4, W4, C)
+            f_t = f_t.reshape(f_t.shape[0], -1, C)                       # (B, P, C)
             h_t = self.feature_decoder(f_t)                           # (B, P, C)
             # ##### ##### #####
 

@@ -180,10 +180,10 @@ class Backbone(nn.Module):
 
         f = self.token_projection(f)                                          # (B, C, H4, W4)
         f = f + self.frame_pos_embedding                                      # (B, C, H4, W4)
-        C = f.shape[1]
+        # C = f.shape[1]
 
-        f = f.permute(0, 2, 3, 1)                           # (B, H4, W4, C)
-        f = f.reshape(f.shape[0], -1, C)                       # (B, P, C)
+        # f = f.permute(0, 2, 3, 1)                           # (B, H4, W4, C)
+        # f = f.reshape(f.shape[0], -1, C)                       # (B, P, C)
 
         return f
     
