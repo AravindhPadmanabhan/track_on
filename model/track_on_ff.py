@@ -122,8 +122,8 @@ class TrackOnFF(TrackOn):
         y_grid = (y / self.size[0]) * 2 - 1
         grid = torch.stack([x_grid, y_grid], dim=-1).view(N_new, 1, 1, 2).to(self.device)                         # (N_new, 1, 1, 2)
 
-        self.prev_ft = self.prev_ft.expand(N_new, -1, -1, -1).reshape(N_new, C, self.H_prime, self.W_prime)       # (N_new, C, H4, W4)
-        sampled = F.grid_sample(self.prev_ft, grid, mode='bilinear', padding_mode='border', align_corners=False)  # (N_new, C, 1, 1)
+        f_t = self.prev_ft.expand(N_new, -1, -1, -1).reshape(N_new, C, self.H_prime, self.W_prime)       # (N_new, C, H4, W4)
+        sampled = F.grid_sample(f_t, grid, mode='bilinear', padding_mode='border', align_corners=False)  # (N_new, C, 1, 1)
         q_init_new = sampled.reshape(1, N_new, C)                                                                 # (1, N_new, C)
         self.q_init = torch.cat([self.q_init, q_init_new], dim=1)
 
@@ -136,8 +136,15 @@ class TrackOnFF(TrackOn):
             removed_indices (List(int)): Indices of the queries that were removed, so that the
                 removal can be reflected on the memory
         """
-        # Rescale queries
         self.query_times = queries[:, 0]     # (N)
+        if self.t == 1:
+            N_new = 0
+        else:
+            N_new = (self.query_times == self.t - 1).sum().item()
+        if N_new == 0 and len(removed_indices) == 0:
+            return
+
+        # Rescale queries
         queries = queries[:,1:]              # (N, 2)
         self.N = queries.size(0)
         H, W = frame.shape[-2], frame.shape[-1]
@@ -146,31 +153,34 @@ class TrackOnFF(TrackOn):
         self.queries = queries
 
         # Remove rejected queries and memory
-        removed_mask = torch.ones(self.N, device=queries.device, dtype=torch.bool)
+        N_prev = self.q_init.shape[1]
+        removed_mask = torch.ones(N_prev, device=queries.device, dtype=torch.bool)
         removed_mask[removed_indices] = False
         spatial_memory = self.prev_spatial_memory[:, removed_mask, :, :]  # (1, N", max_memory_size, C)
         context_memory = self.prev_context_memory[:, removed_mask, :, :]  # (1, N", max_memory_size, C)
-        past_occ = self.prev_past_occ[:, removed_mask, :, :]              # (1, N", max_memory_size)
-        past_mask = self.prev_past_mask[:, removed_mask, :, :]            # (1, N", max_memory_size)
+        past_occ = self.prev_past_occ[:, removed_mask, :]              # (1, N", max_memory_size)
+        past_mask = self.prev_past_mask[:, removed_mask, :]            # (1, N", max_memory_size)
         p_head_t = self.prev_p[removed_mask]                              # (N", 2)
         prev_v = self.prev_v[removed_mask]                                # (N")
         self.q_init = self.q_init[:, removed_mask, :]                     # (1, N", C)
 
         # Sample new query tokens from current frame
-        new_queries = queries[queries[:, 0] == self.t - 1]
-        N_new = new_queries.shape[0]
+        # new_queries = queries[queries[:, 0] == self.t - 1]
+        # N_new = new_queries.shape[0]
         assert N_new == self.N - self.q_init.shape[1]
-        self.sample_queries(new_queries)
-
-        # Update memory for new queries
         max_memory_size = self.spatial_memory.shape[2]
         C = self.prev_ft.shape[1]
-        spatial_memory = torch.cat([spatial_memory, torch.zeros(1, N_new, max_memory_size, C, device=self.device)], dim=1)
-        context_memory = torch.cat([context_memory, torch.zeros(1, N_new, max_memory_size, C, device=self.device)], dim=1)
-        past_mask = torch.cat([past_mask, torch.ones(1, N_new, max_memory_size, device=self.device, dtype=torch.bool)], dim=1)
-        past_occ = torch.cat([past_occ, torch.ones(1, N_new, max_memory_size, device=self.device, dtype=torch.bool)], dim=1)
-        p_head_t = torch.cat([p_head_t, self.queries[-N_new:]], dim=0)  
-        prev_v = torch.cat([prev_v, torch.ones(N_new, device=queries.device, dtype=torch.bool)], dim=0)
+
+        # Update memory for new queries
+        if N_new > 0:
+            new_queries = queries[-N_new:]
+            self.sample_queries(new_queries)
+            spatial_memory = torch.cat([spatial_memory, torch.zeros(1, N_new, max_memory_size, C, device=self.device)], dim=1)
+            context_memory = torch.cat([context_memory, torch.zeros(1, N_new, max_memory_size, C, device=self.device)], dim=1)
+            past_mask = torch.cat([past_mask, torch.ones(1, N_new, max_memory_size, device=self.device, dtype=torch.bool)], dim=1)
+            past_occ = torch.cat([past_occ, torch.ones(1, N_new, max_memory_size, device=self.device, dtype=torch.bool)], dim=1)
+            p_head_t = torch.cat([p_head_t, self.queries[-N_new:]], dim=0)  
+            prev_v = torch.cat([prev_v, torch.ones(N_new, device=queries.device, dtype=torch.bool)], dim=0)
 
         # Update latest memory
         # self.spatial_memory[:, -N_new:, -1, :] = q_init_new   # Under the assumption that I can just put q_init in the memory and dopnt have to make it q_t
@@ -201,11 +211,11 @@ class TrackOnFF(TrackOn):
         c1_t = self.correlation(q_t, h_t)
         q_t, _, _ = self.rerank_module(q_t, h_t, c1_t) 
 
-        q_aug = self.sm_query_updater.get_augmented_memory(q_init, q_t, f_t, p_head_t, query_times, t)   # (1, N, C)
+        q_aug = self.sm_query_updater.get_augmented_memory(q_init, q_t, f_t, p_head_t.unsqueeze(0), query_times, t)   # (1, N, C)
         self.spatial_memory = torch.cat([spatial_memory[:, :, 1:], q_aug.unsqueeze(2)], dim=2)           # (1, N, max_memory_size, C)
         self.context_memory = torch.cat([context_memory[:, :, 1:], q_t.unsqueeze(2)], dim=2)             # (1, N, max_memory_size, C)
         self.past_mask = torch.cat([past_mask[:, :, 1:], ~queried_now_or_before.unsqueeze(-1)], dim=2)  # (1, N, memory_size)
-        self.past_occ = torch.cat([past_occ[:, :, 1:], prev_v.unsqueeze(2)], dim=2)  # (1, N, memory_size)
+        self.past_occ = torch.cat([past_occ[:, :, 1:], prev_v.reshape(1, -1, 1)], dim=2)  # (1, N, memory_size)
 
     def ff_forward(self, frame):
         # :args frame: (1, C, H, W)     frame to extract features from
