@@ -21,8 +21,10 @@ import imageio.v2 as imageio
 
 from utils.train_utils import restart_from_checkpoint_not_dist
 from trackon.track_on_ff import TrackOnFF    # Frame Inputs
+from trackon.track_on_cfg import TrackOnCfg
 
 checkpoint_path = "./checkpoints/track_on_checkpoint.pt"
+N=3
 
 # === Helper functions ===
 def read_video(video_path):
@@ -56,55 +58,11 @@ def get_updated_queries(t):
     else:
         return torch.tensor([[0, 587, 333], [0, 640, 345], [10, 396, 208]]), []
 
-class Args:
-    def __init__(self):
-        self.input_size = [384, 512]
-
-        self.N = 384
-        self.T = 18
-        self.stride = 4
-        self.transformer_embedding_dim = 256
-        self.cnn_corr = False
-        self.linear_visibility = False
-        
-        self.num_layers = 3
-        self.num_layers_offset_head = 3
-        
-        self.num_layers_rerank = 3
-        self.num_layers_rerank_fusion = 1
-        self.top_k_regions = 16
-
-        self.num_layers_spatial_writer = 3
-        self.num_layers_spatial_self = 1
-        self.num_layers_spatial_cross = 1
-        
-        self.memory_size = 12
-        self.val_memory_size = 96
-        self.val_vis_delta = 0.9
-        self.random_memory_mask_drop = 0
-
-        self.lambda_point = 5.0
-        self.lambda_vis = 1.0
-        self.lambda_offset = 1.0
-        self.lambda_uncertainty = 1.0
-        self.lambda_top_k = 1.0
-        
-        self.epoch_num = 4
-        self.lr = 1e-3
-        self.wd = 1e-4
-        self.bs = 1
-        self.gradient_acc_steps = 1
-
-        self.validation = False
-        self.checkpoint_path = checkpoint_path
-        self.seed = 1234
-        self.loss_after_query = True
-
-        self.gpus = torch.cuda.device_count()
-
-args = Args()
+args = TrackOnCfg(checkpoint_path=checkpoint_path)
 model = TrackOnFF(args)
 restart_from_checkpoint_not_dist(args, run_variables={}, model=model)
+distinct_colors = plt.cm.tab20(np.linspace(0, 1, N))
+hex_colors = ['#%02x%02x%02x' % (int(r*255), int(g*255), int(b*255)) for r, g, b, _ in distinct_colors]
 
 model.cuda().eval()
 model.set_memory_size(args.val_memory_size, args.val_memory_size)
