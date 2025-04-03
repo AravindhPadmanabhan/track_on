@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-from model.track_on import TrackOn
+from trackon.track_on import TrackOn
 
 from utils.coord_utils import get_points_on_a_grid
 from utils.coord_utils import indices_to_coords

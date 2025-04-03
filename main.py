@@ -26,7 +26,7 @@ from utils.eval_utils import Evaluator, compute_tapvid_metrics
 
 from utils.coord_utils import get_queries
 
-from model.track_on import TrackOn
+from trackon.track_on import TrackOn
 
 def train(args, train_dataloader, model, optimizer, lr_scheduler, scaler, epoch):
     model.train()

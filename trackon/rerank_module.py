@@ -8,7 +8,7 @@ import torchvision.transforms as T
 
 
 from utils.coord_utils import indices_to_coords
-from model.modules import DMSMHA_Block, MHA_Block
+from trackon.modules import DMSMHA_Block, MHA_Block
 
 
 class Rerank_Module(nn.Module):
