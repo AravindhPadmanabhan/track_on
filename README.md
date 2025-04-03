@@ -58,7 +58,7 @@ Track-On provides two practical usage modes, both handling frames online but dif
 
 #### 1. **Frame-by-frame input (for streaming videos)**
 ```python
-from model.track_on_ff import TrackOnFF
+from trackon.track_on_ff import TrackOnFF
 
 model = TrackOnFF(args)
 model.init_queries_and_memory(queries, first_frame)
@@ -69,7 +69,7 @@ while True:
 
 #### 2. **Video input (for benchmarking)**
 ```python
-from model.track_on import TrackOn
+from trackon.track_on import TrackOn
 
 model = TrackOn(args)
 out = model.inference(video, queries)

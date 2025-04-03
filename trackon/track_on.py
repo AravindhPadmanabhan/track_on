@@ -8,14 +8,14 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 
 
-from model.backbone import Backbone
-from model.spatial_memory import Query_Updater
-from model.query_decoder import Query_Decoder
-from model.modules import Token_Decoder
-from model.offset_head import Offset_Head
-from model.rerank_module import Rerank_Module
-from model.visibility_head import Visibility_Head
-from model.loss import Loss_Function
+from trackon.backbone import Backbone
+from trackon.spatial_memory import Query_Updater
+from trackon.query_decoder import Query_Decoder
+from trackon.modules import Token_Decoder
+from trackon.offset_head import Offset_Head
+from trackon.rerank_module import Rerank_Module
+from trackon.visibility_head import Visibility_Head
+from trackon.loss import Loss_Function
 
 from utils.coord_utils import get_points_on_a_grid
 from utils.coord_utils import indices_to_coords

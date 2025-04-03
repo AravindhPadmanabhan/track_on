@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-from model.modules import DMSMHA_Block, get_deformable_inputs
+from trackon.modules import DMSMHA_Block, get_deformable_inputs
 
 
 

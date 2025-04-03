@@ -6,3 +6,5 @@
 *.npy
 out/*
 dataset/*
+
+*egg-info/*
