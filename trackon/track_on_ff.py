@@ -305,9 +305,11 @@ class TrackOnFF(TrackOn):
         if self.extend_queries:
             coord_pred = p_head_t[0, :self.N]               # (N, 2)
             vis_pred = F.sigmoid(v_t_logit)[0, :self.N] > self.visibility_treshold     # (N)
+            conf_pred = 1 - F.sigmoid(u_t_logit)[0, :self.N] > self.confidence_treshold     # (N)
         else:
             coord_pred = p_head_t[0]
             vis_pred = F.sigmoid(v_t_logit)[0] > self.visibility_treshold
+            conf_pred = 1 - F.sigmoid(u_t_logit)[0] > self.confidence_treshold
 
         self.prev_p = coord_pred.clone()
         self.prev_v = vis_pred.clone()
@@ -315,7 +317,7 @@ class TrackOnFF(TrackOn):
         coord_pred[:, 1] = (coord_pred[:, 1] / self.size[0]) * H
         coord_pred[:, 0] = (coord_pred[:, 0] / self.size[1]) * W
 
-        return coord_pred, vis_pred
+        return coord_pred, vis_pred, conf_pred
 
 
 

@@ -95,7 +95,7 @@ with torch.no_grad():
     
         # === Model forward, for each frame ===
         
-        point, vis = model.ff_forward(video[t].unsqueeze(0).cuda())
+        point, vis, conf = model.ff_forward(video[t].unsqueeze(0).cuda())
         # === === ===
     
         # === Save the predictions frame-by-frame ===

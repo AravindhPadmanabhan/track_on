@@ -29,6 +29,7 @@ class TrackOn(nn.Module):
         self.N = args.N                 # number of queries
         self.T = args.T                 # number of frames
         self.visibility_treshold = 0.8
+        self.confidence_treshold = 0.9
         self.top_k_regions = args.top_k_regions
 
         self.size = args.input_size
