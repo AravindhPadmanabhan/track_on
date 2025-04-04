@@ -139,6 +139,7 @@ class TrackOnFF(TrackOn):
         self.query_times = queries[:, 0]     # (N)
         if self.t == 1:
             N_new = 0
+            assert len(removed_indices) == 0
         else:
             N_new = (self.query_times == self.t - 1).sum().item()
         if N_new == 0 and len(removed_indices) == 0:
