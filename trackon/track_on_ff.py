@@ -41,6 +41,7 @@ class TrackOnFF(TrackOn):
         # :args queries: (N, 2)         (x, y) in given frame
         # :args frame: (1, C, H, W)     frame to extract features from
 
+        self.t = 0
         self.query_times = queries[:, 0]     # (N)
         queries = queries[:,1:]  # (N, 2)
         self.N = queries.size(0)

@@ -12,6 +12,7 @@ def compute_tapvid_metrics(
     pred_occluded: np.ndarray,
     pred_tracks: np.ndarray,
     query_mode: str,
+    end_frames: np.ndarray,
 ) -> Mapping[str, np.ndarray]:
     """Computes TAP-Vid metrics (Jaccard, Pts. Within Thresh, Occ. Acc.)
     See the TAP-Vid paper for details on the metric computation.  All inputs are
@@ -57,16 +58,17 @@ def compute_tapvid_metrics(
 
     if query_mode == "first":
         # evaluate frames after the query frame
-        query_frame_to_eval_frames = np.cumsum(eye, axis=1) - eye
-    elif query_mode == "strided":
-        # evaluate all frames except the query frame
-        query_frame_to_eval_frames = 1 - eye
+        query_frame = query_points[..., 0]
+        start = query_frame.reshape(query_frame.shape[1], 1) 
+        stop = end_frames.reshape(end_frames.shape[0], 1)
+        time_range = np.arange(pred_tracks.shape[2]).reshape(1, pred_tracks.shape[2])
+        evaluation_points = (time_range > start) & (time_range <= stop)
+
+    # elif query_mode == "strided":
+    #     # evaluate all frames except the query frame
+    #     query_frame_to_eval_frames = 1 - eye
     else:
         raise ValueError("Unknown query mode " + query_mode)
-
-    query_frame = query_points[..., 0]
-    query_frame = np.round(query_frame).astype(np.int32)
-    evaluation_points = query_frame_to_eval_frames[query_frame] > 0
 
     # Occlusion accuracy is simply how often the predicted occlusion equals the
     # ground truth.

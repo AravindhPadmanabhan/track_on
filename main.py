@@ -18,7 +18,7 @@ import wandb
 from read_args import get_args, print_args
 from utils.train_utils import init_distributed_mode, fix_random_seeds
 from utils.train_utils import get_dataloaders, get_scheduler
-from utils.train_utils import restart_from_checkpoint, save_on_master
+from utils.train_utils import restart_from_checkpoint, save_on_master, restart_from_checkpoint_not_dist
 
 from utils.log_utils import init_wandb, log_eval_metrics, log_batch_loss, log_epoch_loss
 
@@ -26,7 +26,9 @@ from utils.eval_utils import Evaluator, compute_tapvid_metrics
 
 from utils.coord_utils import get_queries
 
-from trackon.track_on import TrackOn
+from trackon.track_on_cfg import TrackOnCfg
+from trackon.track_on_ff import TrackOnFF
+from randomize import generate_random_lifetimes
 
 def train(args, train_dataloader, model, optimizer, lr_scheduler, scaler, epoch):
     model.train()
@@ -99,9 +101,9 @@ def train(args, train_dataloader, model, optimizer, lr_scheduler, scaler, epoch)
 
 @torch.no_grad()
 def evaluate(args, val_dataloader, model, epoch, verbose=False):
-    model.eval()
-    model.module.extend_queries = True
-    model.module.set_memory_mask_ratio(0)
+    # model.eval()
+    # model.module.extend_queries = True
+    # model.module.set_memory_mask_ratio(0)
 
     evaluator = Evaluator()
     total_frames = 0
@@ -124,29 +126,53 @@ def evaluate(args, val_dataloader, model, epoch, verbose=False):
         queries = query_points_i.clone().float()
         queries = torch.stack([queries[:, :, 0], queries[:, :, 2], queries[:, :, 1]], dim=2).to(device)
 
+        ids_list, removed_indices_list, new_queries_list, gt_traj, gt_vis, queries_sorted, end_frames = generate_random_lifetimes(
+                    T,
+                    queries.clone(),
+                    trajectory.clone(),
+                    visibility.clone(),
+                    t=int(T/5),
+                )
+        traj = torch.zeros_like(trajectory).to(device)  # (1, T, N, 2)
+        vis = torch.zeros_like(visibility).to(device)  # (1, T, N)
 
-        if args.online_validation:
-            out = model.module.inference(video, queries)
-        else:
-            out = model.module(video, queries, trajectory, visibility)
-        pred_trajectory = out["points"]                # (1, T, N, 2)
-        pred_visibility = out["visibility"]            # (1, T, N)
+        is_first_step = True
+        delay = 0
+        init_img = video[:, 0, :, :, :] # (1, 3, H, W)
+        for i in range(1, T):
+            queries_in = queries_sorted[:,ids_list[i]].squeeze(0)
+            queries_in[:,0] -= delay
+            if is_first_step:
+                if queries_in.shape[0] == 0:
+                    init_img = video[:, i, :, :, :] # (1, 3, H, W)
+                    delay += 1
+                    continue
+                model.init_queries_and_memory(queries_in, init_img)
+                __ = model.ff_forward(init_img)
+                model.update_queries_and_memory(queries_in, video[:,i], removed_indices_list[i])
+                is_first_step = False
+            else:
+                if queries_in.shape[0] == 0:
+                    break
+                model.update_queries_and_memory(queries_in, video[:,i], removed_indices_list[i])
+            pred_traj, pred_vis, _ = model.ff_forward(video[:,i])
+            traj[0, i, ids_list[i]] = pred_traj
+            vis[0, i, ids_list[i]] = pred_vis
 
         # Timer end
         total_time += time.time() - start_time
 
         # === === ===
         # From CoTracker
-        traj = trajectory.clone()
-        query_points = query_points_i.clone().cpu().numpy()
-        gt_tracks = traj.permute(0, 2, 1, 3).cpu().numpy()
-        gt_occluded = torch.logical_not(visibility.clone().permute(0, 2, 1)).cpu().numpy()
-        pred_occluded = torch.logical_not(pred_visibility.clone().permute(0, 2, 1)).cpu().numpy()
-        pred_tracks = pred_trajectory.permute(0, 2, 1, 3).cpu().numpy()
+        query_points = queries_sorted.clone().cpu().numpy()
+        gt_tracks = gt_traj.permute(0, 2, 1, 3).cpu().numpy()
+        gt_occluded = torch.logical_not(gt_vis.clone().permute(0, 2, 1)).cpu().numpy()
+        pred_occluded = torch.logical_not(vis.clone().permute(0, 2, 1)).cpu().numpy()
+        pred_tracks = traj.permute(0, 2, 1, 3).cpu().numpy()
         # === === ===
 
 
-        out_metrics = compute_tapvid_metrics(query_points, gt_occluded, gt_tracks, pred_occluded, pred_tracks, "first")
+        out_metrics = compute_tapvid_metrics(query_points, gt_occluded, gt_tracks, pred_occluded, pred_tracks, "first", end_frames=end_frames.cpu().numpy())
         if verbose:
             print(f"Video {j}/{len(val_dataloader)}: AJ: {out_metrics['average_jaccard'][0] * 100:.2f}, delta_avg: {out_metrics['average_pts_within_thresh'][0] * 100:.2f}, OA: {out_metrics['occlusion_accuracy'][0] * 100:.2f}", flush=True)
         evaluator.update(out_metrics)
@@ -179,8 +205,9 @@ def main_worker(args):
     # ##### ##### #####
     
     # ##### Model & Training #####
-    model = TrackOn(args).to(args.gpu)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+    cfg = TrackOnCfg(checkpoint_path=args.checkpoint_path)
+    model = TrackOnFF(cfg)
+    # model = nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
 
 
     if not args.validation:
@@ -198,9 +225,10 @@ def main_worker(args):
     to_restore = {"epoch": 0}
     if args.checkpoint_path is not None:
         if args.validation:
-            restart_from_checkpoint(args, 
-                                run_variables=to_restore, 
-                                model=model)
+            # restart_from_checkpoint(args, 
+            #                     run_variables=to_restore, 
+            #                     model=model)
+            restart_from_checkpoint_not_dist(cfg, run_variables={}, model=model)
         else:
             restart_from_checkpoint(args, 
                                     run_variables=to_restore, 
@@ -213,9 +241,10 @@ def main_worker(args):
     start_epoch = to_restore["epoch"]
 
     if args.validation and args.rank == 0:
-        model.module.visibility_treshold = args.val_vis_delta
-        model.module.set_memory_size(args.val_memory_size, args.val_memory_size)
-        evaluate(args, val_dataloader, model, -1, verbose=True)
+        model.visibility_treshold = cfg.val_vis_delta
+        model.to("cuda").eval()
+        model.set_memory_size(cfg.val_memory_size, cfg.val_memory_size)
+        delta, aj, oa = evaluate(args, val_dataloader, model, -1, verbose=True)
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print()
@@ -224,7 +253,7 @@ def main_worker(args):
     dist.barrier()
     if args.validation:
         dist.destroy_process_group()
-        return
+        return delta, aj, oa
     
     print("Training starts")
 
@@ -293,4 +322,15 @@ def main_worker(args):
 
 if __name__ == '__main__':
     args = get_args()
-    main_worker(args)
+    deltas = []
+    aj_scores = []
+    oa_scores = []
+    for i in range(50):
+        delta, aj, oa = main_worker(args)
+        deltas.append(delta)
+        aj_scores.append(aj)
+        oa_scores.append(oa)
+    print(f"Average Delta: {np.mean(deltas):.3f} ± {np.std(deltas):.3f}")
+    print(f"Average AJ: {np.mean(aj_scores):.3f} ± {np.std(aj_scores):.3f}")
+    print(f"Average OA: {np.mean(oa_scores):.3f} ± {np.std(oa_scores):.3f}")
+    print("Done")
