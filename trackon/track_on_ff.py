@@ -140,6 +140,7 @@ class TrackOnFF(TrackOn):
         self.query_times = queries[:, 0]     # (N)
         if self.t == 1:
             N_new = 0
+            assert len(removed_indices) == 0
         else:
             N_new = (self.query_times == self.t - 1).sum().item()
         if N_new == 0 and len(removed_indices) == 0:
@@ -292,7 +293,7 @@ class TrackOnFF(TrackOn):
 
         # Masking Update
         past_mask = torch.cat([past_mask[:, :, 1:], ~queried_now_or_before.unsqueeze(-1)], dim=2)                           # (1, N, memory_size)
-        past_occ = torch.cat([past_occ[:, :, 1:], (F.sigmoid(v_t_logit) < self.visibility_treshold).unsqueeze(-1)], dim=2)  # (1, N, memory_size)
+        past_occ = torch.cat([past_occ[:, :, 1:], (torch.sigmoid(v_t_logit) < self.visibility_treshold).unsqueeze(-1)], dim=2)  # (1, N, memory_size)
         # ##### ##### #####
 
         # Update Variables
@@ -305,12 +306,12 @@ class TrackOnFF(TrackOn):
         # Return Pred and Visü
         if self.extend_queries:
             coord_pred = p_head_t[0, :self.N]               # (N, 2)
-            vis_pred = F.sigmoid(v_t_logit)[0, :self.N] > self.visibility_treshold     # (N)
-            conf_pred = 1 - F.sigmoid(u_t_logit)[0, :self.N] > self.confidence_treshold     # (N)
+            vis_pred = torch.sigmoid(v_t_logit)[0, :self.N] > self.visibility_treshold     # (N)
+            conf_pred = 1 - torch.sigmoid(u_t_logit)[0, :self.N] > self.confidence_treshold     # (N)
         else:
             coord_pred = p_head_t[0]
-            vis_pred = F.sigmoid(v_t_logit)[0] > self.visibility_treshold
-            conf_pred = 1 - F.sigmoid(u_t_logit)[0] > self.confidence_treshold
+            vis_pred = torch.sigmoid(v_t_logit)[0] > self.visibility_treshold
+            conf_pred = 1 - torch.sigmoid(u_t_logit)[0] > self.confidence_treshold
 
         self.prev_p = coord_pred.clone()
         self.prev_v = vis_pred.clone()
