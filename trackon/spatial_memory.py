@@ -147,12 +147,12 @@ class Query_Updater(nn.Module):
             if fully_ignored.all():
                 return q_init.clone()
 
-            q = q_init.view(B * N, 1, C)                # (B * N, 1, C)
+            q = q_init.reshape(B * N, 1, C)                # (B * N, 1, C)
             q_start = q.clone()
 
-            kv = past_aug_q.view(B * N, -1, C)              # (B * N, memory_size, C)
-            mask = ignore_mask.view(B * N, -1)               # (B * N, memory_size)
-            fully_ignored = fully_ignored.view(B * N)        # (B * N)
+            kv = past_aug_q.reshape(B * N, -1, C)              # (B * N, memory_size, C)
+            mask = ignore_mask.reshape(B * N, -1)               # (B * N, memory_size)
+            fully_ignored = fully_ignored.reshape(B * N)        # (B * N)
 
             q = q[~fully_ignored]                        # (useful_query_num, 1, C)
             kv = kv[~fully_ignored]                      # (useful_query_num, memory_size, C)
@@ -178,6 +178,6 @@ class Query_Updater(nn.Module):
             # </Memory to Query>
 
             q_start[~fully_ignored] = q_start[~fully_ignored] + self.query_residual(q)  # (useful_query_num, 1, C)
-            q_start = q_start.view(B, N, C)
+            q_start = q_start.reshape(B, N, C)
 
             return q_start
