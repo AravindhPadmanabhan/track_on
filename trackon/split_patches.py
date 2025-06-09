@@ -52,7 +52,6 @@ class PatchSplitter:
         return patch_queries
 
     def combine_tracks(self, tracks, status):
-        T = tracks.shape[1]
         N = self.tracks_mask.shape[1]
         H, W = self.original_image_dims
         h, w = self.interp_shape
@@ -71,9 +70,9 @@ class PatchSplitter:
 
         row_idx = combined_status.argmax(dim=0)
         final_status = combined_status.max(dim=0, keepdim=True).values
-        tracks_perm = combined_tracks.permute(1, 2, 0, 3)  # (T, N, 4, 2)
-        index = row_idx[None, :, None].expand(T, N, 1).unsqueeze(-1).expand(T, N, 1, 2)
-        final_tracks = tracks_perm.gather(2, index)  # (T, N, 1, 2)
-        final_tracks = final_tracks.squeeze(2).unsqueeze(0)
+        tracks_perm = combined_tracks.permute(1, 0, 2)  # (N, B, 2)
+        index = row_idx[:, None].expand(N, 1).unsqueeze(-1).expand(N, 1, 2)
+        final_tracks = tracks_perm.gather(1, index)  # (N, 1, 2)
+        final_tracks = final_tracks.squeeze(1).unsqueeze(0)
 
         return final_tracks, final_status

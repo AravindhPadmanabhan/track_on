@@ -41,13 +41,13 @@ class TrackOnFF(TrackOn):
         self.splitter = None
 
     def init_queries_and_memory(self, queries, frame):
-        # :args queries: (1, N, 3)         (t, x, y) in given frame
+        # :args queries: (N, 3)         (t, x, y) in given frame
         # :args frame: (1, C, H, W)     frame to extract features from
 
         H, W = frame.shape[-2], frame.shape[-1]
         self.splitter = PatchSplitter(self.size, (H, W))
         frame = self.splitter.split_video(frame)  # (B, C, H, W)
-        queries = self.splitter.split_queries(queries, self.t)  # (B, N_max, 3)
+        queries = self.splitter.split_queries(queries.unsqueeze(0), self.t)  # (B, N_max, 3)
 
         self.t = 0
         self.query_times = queries[:, :, 0]     # (B,N)
@@ -115,17 +115,20 @@ class TrackOnFF(TrackOn):
 
         for i in range(B):
             N_new = N_max - removed_mask[i].sum().item()  # Number of new queries to be added
+            if N_new == 0:
+                continue
 
             pos_query = queries[i,-N_new:].unsqueeze(0)           # (1, N_new, 2) 
             x, y = pos_query[:, :, 0], pos_query[:, :, 1]  # (1, N_new)
             x_grid = (x / self.size[1]) * 2 - 1
             y_grid = (y / self.size[0]) * 2 - 1
-            grid = torch.stack([x_grid, y_grid], dim=-1).view(N_new, 1, 1, 2).to(self.device)                         # (N_new, 1, 1, 2)
+            grid = torch.stack([x_grid, y_grid], dim=-1).view(N_new, 1, 1, 2).to(self.device)                   # (N_new, 1, 1, 2)
 
             f_t = self.prev_ft[i].expand(N_new, -1, -1, -1).reshape(N_new, C, self.H_prime, self.W_prime)       # (N_new, C, H4, W4)
-            sampled = F.grid_sample(f_t, grid, mode='bilinear', padding_mode='border', align_corners=False)  # (N_new, C, 1, 1)
-            q_init_new = sampled.reshape(N_new, C)                                                                 # (N_new, C)
-            self.q_init[i] = torch.cat([self.q_init[i], q_init_new], dim=0)
+            sampled = F.grid_sample(f_t, grid, mode='bilinear', padding_mode='border', align_corners=False)     # (N_new, C, 1, 1)
+            q_init_new = sampled.reshape(N_new, C)
+            assert (self.q_init[i, -N_new:] == 0).all().item(), "Query embedding is being overwritten"          # (N_new, C)
+            self.q_init[i, -N_new:] = q_init_new
 
         
 
@@ -133,31 +136,31 @@ class TrackOnFF(TrackOn):
         """Function called at all timesteps t>0 to remove rejected queries and add new queries
         Args:
             queries (Tensor): Contains old queries that are still being tracked and new queries
-                added to the previous frame. Shape (1,N,3) - Each query is of the format [t, x, y]
+                added to the previous frame. Shape (N,3) - Each query is of the format [t, x, y]
             removed_indices (List(int)): Indices of the queries that were removed, so that the
                 removal can be reflected on the memory
         """
-        queries = self.splitter.split_queries(queries, self.t-1)  # (B, N_max, 3)
-        removed_mask = self.splitter.split_removed_indices(removed_indices)  # (B, N_max_prev)
+        removed_mask = self.splitter.split_removed_indices(removed_indices)    # (B, N_max_prev)
+        queries = self.splitter.split_queries(queries.unsqueeze(0), self.t-1)  # (B, N_max, 3)
 
         B = queries.shape[0]
         N_max = queries.shape[1]
         self.query_times = queries[:, :, 0]     # (B,N_max)
         if self.t == 1:
             return
-        elif N_max == self.prev_N_max and removed_mask.all().item() == True:  # On the offchance that no new queries are added, when all patches have same no. of queries and none removed.
+        elif N_max == removed_mask.shape[1] and removed_mask.all().item() == True:  # On the offchance that no new queries are added, when all patches have same no. of queries and none removed.
             return
 
-        self.queries = queries[:,:,1:]   # (B, N, 2)
+        self.queries = queries[:,:,1:]          # (B, N_max, 2)
 
         # Remove rejected queries and memory
-        M, C = self.prev_spatial_memory.shape[1:3]
+        M, C = self.prev_spatial_memory.shape[-2:]
         spatial_memory = torch.zeros(B, N_max, M, C, device=self.device)                              # (B, N_max, M, C)
         context_memory = torch.zeros(B, N_max, M, C, device=self.device)                              # (B, N_max, M, C)
         past_occ = torch.ones(B, N_max, M, device=self.device, dtype=torch.bool)                      # (B, N_max, M)
         past_mask = torch.ones(B, N_max, M, device=self.device, dtype=torch.bool)                     # (B, N_max, M)
         p_head_t = torch.zeros(B, N_max, 2, device=self.device)                                       # (B, N_max, 2)
-        prev_v = torch.zeros(B, N_max, device=self.device, dtype=torch.bool)                          # (B, N_max)
+        prev_v = torch.ones(B, N_max, device=self.device, dtype=torch.bool)                          # (B, N_max)
         q_init = torch.zeros(B, N_max, C, device=self.device)                                         # (B, N_max, C)
         for i in range(B):
             spatial_memory[i, :removed_mask[i].sum()] = self.prev_spatial_memory[i, removed_mask[i]]
@@ -174,12 +177,7 @@ class TrackOnFF(TrackOn):
         # Update memory for new queries
         for i in range(B):
             N_new = N_max - removed_mask[i].sum().item()
-            spatial_memory[i] = torch.cat([spatial_memory[i], torch.zeros(N_new, M, C, device=self.device)], dim=1)
-            context_memory[i] = torch.cat([context_memory[i], torch.zeros(N_new, M, C, device=self.device)], dim=1)
-            past_mask[i] = torch.cat([past_mask[i], torch.ones(N_new, M, device=self.device, dtype=torch.bool)], dim=1)
-            past_occ[i] = torch.cat([past_occ[i], torch.ones(N_new, M, device=self.device, dtype=torch.bool)], dim=1)
-            p_head_t[i] = torch.cat([p_head_t[i], self.queries[-N_new:]], dim=0)  
-            prev_v[i] = torch.cat([prev_v[i], torch.ones(N_new, device=queries.device, dtype=torch.bool)], dim=0)
+            p_head_t[i, -N_new:] = self.queries[i,-N_new:]
 
         # fake ff_forward to recompute memory with replaced queries
         f_t = self.prev_ft.permute(0, 2, 3, 1)                                                        # (B, H4, W4, C)
@@ -214,7 +212,6 @@ class TrackOnFF(TrackOn):
         self.context_memory = torch.cat([context_memory[:, :, 1:], q_t.unsqueeze(2)], dim=2)             # (B, N_max, M, C)
         self.past_mask = torch.cat([past_mask[:, :, 1:], ~queried_now_or_before.unsqueeze(-1)], dim=2)   # (B, N_max, M)
         self.past_occ = torch.cat([past_occ[:, :, 1:], prev_v.unsqueeze(-1)], dim=2)                     # (B, N_max, M)
-        self.prev_N_max = N_max
 
     def ff_forward(self, frame):
         # :args frame: (1, C, H, W)     frame to extract features from
@@ -302,7 +299,7 @@ class TrackOnFF(TrackOn):
 
         # Return Pred and Visü
         vis_pred = torch.sigmoid(v_t_logit) > self.visibility_treshold
-        conf_pred = 1 - torch.sigmoid(u_t_logit) > self.confidence_treshold
+        conf_pred = 1 - torch.sigmoid(u_t_logit)
 
         self.prev_p = p_head_t.clone()
         self.prev_v = vis_pred.clone()
@@ -312,7 +309,7 @@ class TrackOnFF(TrackOn):
 
         p_head_t, conf_pred = self.splitter.combine_tracks(p_head_t, conf_pred)  # (1, N, 2), (1, N)
 
-        return p_head_t[0], conf_pred[0]
+        return p_head_t[0], conf_pred[0] > self.confidence_treshold
 
 
 
