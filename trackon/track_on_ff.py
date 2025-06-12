@@ -10,13 +10,13 @@ from trackon.track_on import TrackOn
 
 from utils.coord_utils import get_points_on_a_grid
 from utils.coord_utils import indices_to_coords
+from trackon.local_grid import add_support_grid, augment_removed_indices
 
 
 class TrackOnFF(TrackOn):
     def __init__(self, args):
         super().__init__(args=args)
 
-        self.extend_queries = False
         self.query_times = None
         # self.set_memory_size(new_memory_size, new_memory_size)
 
@@ -37,9 +37,14 @@ class TrackOnFF(TrackOn):
         self.prev_p = None
         self.prev_v = None
 
+        self.local_grid_size = 6
+        self.local_grid_extent = 48
+
     def init_queries_and_memory(self, queries, frame):
-        # :args queries: (N, 2)         (x, y) in given frame
+        # :args queries: (N, 3)         (x, y) in given frame
         # :args frame: (1, C, H, W)     frame to extract features from
+
+        queries = add_support_grid(queries, self.local_grid_size, self.local_grid_extent)
 
         self.t = 0
         self.query_times = queries[:, 0]     # (N)
@@ -53,14 +58,6 @@ class TrackOnFF(TrackOn):
         # === Set Queries ===
         queries[:, 1] = (queries[:, 1] / H) * self.size[0]
         queries[:, 0] = (queries[:, 0] / W) * self.size[1]
-
-
-
-        if self.extend_queries:
-            K = 20
-            extra_queries = get_points_on_a_grid(K, self.size, self.device)           # (1, K ** 2, 2)
-            queries = torch.cat([queries, extra_queries[0]], dim=0)              # (N + K ** 2, 2)
-            self.query_times = torch.cat([self.query_times, torch.zeros(extra_queries.shape[1], self.device)], dim=0)   # (N + K ** 2)
         self.queries = queries
 
         # === === ===
@@ -137,6 +134,9 @@ class TrackOnFF(TrackOn):
             removed_indices (List(int)): Indices of the queries that were removed, so that the
                 removal can be reflected on the memory
         """
+        queries = add_support_grid(queries, self.local_grid_size, self.local_grid_extent)
+        removed_indices = augment_removed_indices(removed_indices, self.local_grid_size)
+
         self.query_times = queries[:, 0]     # (N)
         if self.t == 1:
             N_new = 0
@@ -304,22 +304,21 @@ class TrackOnFF(TrackOn):
         self.t += 1
 
         # Return Pred and Visü
-        if self.extend_queries:
-            coord_pred = p_head_t[0, :self.N]               # (N, 2)
-            vis_pred = torch.sigmoid(v_t_logit)[0, :self.N] > self.visibility_treshold     # (N)
-            conf_pred = 1 - torch.sigmoid(u_t_logit)[0, :self.N] > self.confidence_treshold     # (N)
-        else:
-            coord_pred = p_head_t[0]
-            vis_pred = torch.sigmoid(v_t_logit)[0] > self.visibility_treshold
-            conf_pred = 1 - torch.sigmoid(u_t_logit)[0] > self.confidence_treshold
+        coord_pred = p_head_t[0]
+        vis_pred = torch.sigmoid(v_t_logit)[0] > self.visibility_treshold
 
         self.prev_p = coord_pred.clone()
         self.prev_v = vis_pred.clone()
+
+        if self.local_grid_size > 0:
+            step_size = 1 + self.local_grid_size**2
+            coord_pred = coord_pred[::step_size]
+            vis_pred = vis_pred[::step_size]
+            u_t_logit = u_t_logit[:,::step_size]
+
+        conf_pred = 1 - torch.sigmoid(u_t_logit)[0] > self.confidence_treshold
 
         coord_pred[:, 1] = (coord_pred[:, 1] / self.size[0]) * H
         coord_pred[:, 0] = (coord_pred[:, 0] / self.size[1]) * W
 
         return coord_pred, vis_pred, conf_pred
-
-
-
