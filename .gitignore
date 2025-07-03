@@ -1,6 +1,7 @@
 # Ignore all .pt files
 *.pt
 **/*.pt
+checkpoints
 
 *.pyc
 *.npy
